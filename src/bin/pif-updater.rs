@@ -1,6 +1,6 @@
 use std::env;
 use std::fs;
-use std::io::Write;
+use std::io::{self, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -12,12 +12,27 @@ const PIF_INFO_TMP: &str = "/data/system/pif_info_tmp";
 const PIF_INFO: &str = "/data/pif_info";
 const OEM_DIR: &str = "/data/local/oemports10t";
 
-fn run(cmd: &str, args: &[&str]) -> String {
-    let output = Command::new(cmd)
-        .args(args)
-        .output()
-        .unwrap_or_else(|_| panic!("failed to run command {}", cmd));
-    String::from_utf8_lossy(&output.stdout).to_string()
+fn download_file(url: &str, dest_path: &str) -> Result<(), String> {
+    let agent = ureq::AgentBuilder::new()
+        .timeout(Duration::from_secs(30))
+        .build();
+
+    let response = agent.get(url)
+        .call()
+        .map_err(|e| format!("Network error: {}", e))?;
+
+    if response.status() == 200 {
+        let mut file = fs::File::create(dest_path)
+            .map_err(|e| format!("Failed to create file: {}", e))?;
+        
+        let mut reader = response.into_reader();
+        io::copy(&mut reader, &mut file)
+            .map_err(|e| format!("Write error: {}", e))?;
+            
+        Ok(())
+    } else {
+        Err(format!("Server returned status: {}", response.status()))
+    }
 }
 
 fn silent_kill(process: &str) {
@@ -29,27 +44,24 @@ fn silent_kill(process: &str) {
 }
 
 fn curl_details() {
-    let _ = run(
-        "curl",
-        &[
-            "-s",
-            "https://raw.githubusercontent.com/rinnsakaguchi/OemPorts10T-PIF/pif-apk/info.txt",
-            "-o",
-            PIF_INFO_TMP,
-        ],
-    );
-    sleep(Duration::from_secs(1));
-    retry_details_if_fail();
+    let url = "https://raw.githubusercontent.com/rinnsakaguchi/OemPorts10T-PIF/pif-apk/info.txt";
+    if let Err(e) = download_file(url, PIF_INFO_TMP) {
+        println!("Error fetching info: {}. Retrying...", e);
+        sleep(Duration::from_secs(2));
+        curl_details();
+    } else {
+        sleep(Duration::from_secs(1));
+        retry_details_if_fail();
+    }
 }
 
 fn retry_details_if_fail() {
     if let Ok(metadata) = fs::metadata(PIF_INFO_TMP) {
-        if metadata.len() < 100 {
-            println!("Failed retrieving PIF Info, retrying...");
+        if metadata.len() < 10 {
+            println!("PIF Info too small, retrying...");
             curl_details();
         }
     } else {
-        println!("Failed retrieving PIF Info, retrying...");
         curl_details();
     }
 }
@@ -57,53 +69,44 @@ fn retry_details_if_fail() {
 fn fetch_info() {
     loop {
         println!("Checking internet connection...");
-
-        let mut child = Command::new("nc")
-            .args(&["google.com", "80"])
-            .stdin(Stdio::piped())
+        
+        let status = Command::new("ping")
+            .args(&["-c", "1", "-W", "2", "8.8.8.8"])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
-            .spawn()
-            .expect("failed to spawn nc");
+            .status();
 
-        if let Some(mut stdin) = child.stdin.take() {
-            let _ = stdin.write_all(b"GET http://google.com HTTP/1.0\n\n");
-        }
-
-        if let Ok(status) = child.wait() {
-            if status.success() {
+        if let Ok(s) = status {
+            if s.success() {
                 println!("Connected to internet, fetching PIF Info!");
                 curl_details();
                 break;
             }
         }
-
-        sleep(Duration::from_secs(2));
+        sleep(Duration::from_secs(3));
     }
 }
 
 fn curl_pif() {
-    let _ = run(
-        "curl",
-        &[
-            "-s",
-            "https://raw.githubusercontent.com/rinnsakaguchi/OemPorts10T-PIF/pif-apk/PIF.apk",
-            "-o",
-            PIF_APK,
-        ],
-    );
-    sleep(Duration::from_secs(1));
-    retry_pif_if_fail();
+    let url = "https://raw.githubusercontent.com/rinnsakaguchi/OemPorts10T-PIF/pif-apk/PIF.apk";
+    println!("Downloading latest PIF.apk...");
+    if let Err(e) = download_file(url, PIF_APK) {
+        println!("Error downloading APK: {}. Retrying...", e);
+        sleep(Duration::from_secs(2));
+        curl_pif();
+    } else {
+        sleep(Duration::from_secs(1));
+        retry_pif_if_fail();
+    }
 }
 
 fn retry_pif_if_fail() {
     if let Ok(metadata) = fs::metadata(PIF_APK) {
         if metadata.len() < 1000 {
-            println!("Failed retrieving PIF.apk, retrying...");
+            println!("Failed retrieving PIF.apk (file too small), retrying...");
             curl_pif();
         }
     } else {
-        println!("Download failed, retrying...");
         curl_pif();
     }
 }
@@ -155,12 +158,14 @@ fn main_logic() {
     println!("--------------------------------");
 
     if pif_info_tmp_md5 != pif_info_md5 {
-        println!("New Version Found! Downloading...");
+        println!("New Version Found! Updating...");
         curl_pif();
         let _ = fs::copy(PIF_INFO_TMP, PIF_INFO);
-        println!("Installing latest PIF.apk");
         
-        let _ = Command::new("pm").args(&["install", PIF_APK]).status();
+        println!("Installing latest PIF.apk...");
+        // Tambahkan flag -r (reinstall) agar tidak bentrok
+        let _ = Command::new("pm").args(&["install", "-r", PIF_APK]).status();
+        
         silent_kill("com.google.android.gms.unstable");
         silent_kill("com.android.vending");
         let _ = Command::new("pkill").arg("systemui").status();

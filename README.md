@@ -90,7 +90,4 @@ Check [this README](pif-updater.md). The commands and pif.json format is explain
 
 ---
 
-### 🔗 [SELinux Integration Guide for Play Integrity Fix (PIF)](./sepolicy/sepolicy_guide.md)
-
-
-Refer to the above guide for complete steps to integrate the SELinux policy and file contexts required for `pif-updater` auto updater service in enforcing environments.
+This fork for remove sepolicy needed on danda pif method.

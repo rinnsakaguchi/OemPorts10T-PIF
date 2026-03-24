@@ -11,109 +11,39 @@ const PIF_APK: &str = "/data/system/PIF.apk";
 const PIF_INFO_TMP: &str = "/data/system/pif_info_tmp";
 const PIF_INFO: &str = "/data/pif_info";
 const OEM_DIR: &str = "/data/local/oemports10t";
+const URL_BASE: &str = "https://raw.githubusercontent.com/rinnsakaguchi/OemPorts10T-PIF/pif-apk";
 
 fn download_file(url: &str, dest_path: &str) -> Result<(), String> {
-    let agent = ureq::AgentBuilder::new()
-        .timeout(Duration::from_secs(30))
-        .build();
-
-    let response = agent.get(url)
-        .call()
-        .map_err(|e| format!("Network error: {}", e))?;
-
+    let agent = ureq::AgentBuilder::new().timeout(Duration::from_secs(30)).build();
+    let response = agent.get(url).call().map_err(|e| format!("Network error: {}", e))?;
     if response.status() == 200 {
-        let mut file = fs::File::create(dest_path)
-            .map_err(|e| format!("Failed to create file: {}", e))?;
-        
+        let mut file = fs::File::create(dest_path).map_err(|e| format!("Failed to create file: {}", e))?;
         let mut reader = response.into_reader();
-        io::copy(&mut reader, &mut file)
-            .map_err(|e| format!("Write error: {}", e))?;
-            
+        io::copy(&mut reader, &mut file).map_err(|e| format!("Write error: {}", e))?;
         Ok(())
     } else {
         Err(format!("Server returned status: {}", response.status()))
     }
 }
 
+fn md5sum(path: &str) -> String {
+    if !Path::new(path).exists() { return "0".to_string(); }
+    let output = Command::new("md5sum").arg(path).output();
+    if let Ok(out) = output {
+        let text = String::from_utf8_lossy(&out.stdout);
+        text.split_whitespace().next().unwrap_or("0").to_string()
+    } else {
+        "0".to_string()
+    }
+}
+
 fn silent_kill(process: &str) {
-    let _ = Command::new("killall")
-        .arg(process)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
-}
-
-fn curl_details() {
-    let url = "https://raw.githubusercontent.com/rinnsakaguchi/OemPorts10T-PIF/pif-apk/info.txt";
-    if let Err(e) = download_file(url, PIF_INFO_TMP) {
-        println!("Error fetching info: {}. Retrying...", e);
-        sleep(Duration::from_secs(2));
-        curl_details();
-    } else {
-        sleep(Duration::from_secs(1));
-        retry_details_if_fail();
-    }
-}
-
-fn retry_details_if_fail() {
-    if let Ok(metadata) = fs::metadata(PIF_INFO_TMP) {
-        if metadata.len() < 10 {
-            println!("PIF Info too small, retrying...");
-            curl_details();
-        }
-    } else {
-        curl_details();
-    }
-}
-
-fn fetch_info() {
-    loop {
-        println!("Checking internet connection...");
-        
-        let status = Command::new("ping")
-            .args(&["-c", "1", "-W", "2", "8.8.8.8"])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
-
-        if let Ok(s) = status {
-            if s.success() {
-                println!("Connected to internet, fetching PIF Info!");
-                curl_details();
-                break;
-            }
-        }
-        sleep(Duration::from_secs(3));
-    }
-}
-
-fn curl_pif() {
-    let url = "https://raw.githubusercontent.com/rinnsakaguchi/OemPorts10T-PIF/pif-apk/PIF.apk";
-    println!("Downloading latest PIF.apk...");
-    if let Err(e) = download_file(url, PIF_APK) {
-        println!("Error downloading APK: {}. Retrying...", e);
-        sleep(Duration::from_secs(2));
-        curl_pif();
-    } else {
-        sleep(Duration::from_secs(1));
-        retry_pif_if_fail();
-    }
-}
-
-fn retry_pif_if_fail() {
-    if let Ok(metadata) = fs::metadata(PIF_APK) {
-        if metadata.len() < 1000 {
-            println!("Failed retrieving PIF.apk (file too small), retrying...");
-            curl_pif();
-        }
-    } else {
-        curl_pif();
-    }
+    let _ = Command::new("killall").arg(process).stdout(Stdio::null()).stderr(Stdio::null()).status();
 }
 
 fn hellyeah_dir() {
     if !Path::new(OEM_DIR).exists() {
-        let _ = fs::create_dir_all(OEM_DIR);
+        let _ = fs::create_dir_all(OEM_DIR).ok();
         let _ = fs::set_permissions(OEM_DIR, fs::Permissions::from_mode(0o777));
         let _ = Command::new("chown").args(&["root:root", OEM_DIR]).status();
     }
@@ -122,96 +52,116 @@ fn hellyeah_dir() {
 fn push_pif_json(path: &str) {
     hellyeah_dir();
     let dest = format!("{}/pif.json", OEM_DIR);
-    let _ = fs::copy(path, &dest);
-    let _ = fs::set_permissions(&dest, fs::Permissions::from_mode(0o777));
-    let _ = Command::new("chown").args(&["root:root", &dest]).status();
-    silent_kill("com.google.android.gms.unstable");
+    if fs::copy(path, &dest).is_ok() {
+        let _ = fs::set_permissions(&dest, fs::Permissions::from_mode(0o644));
+        let _ = Command::new("chown").args(&["root:root", &dest]).status();
+        println!("✓ pif.json injected to {}", OEM_DIR);
+    }
 }
 
 fn push_keybox_xml(path: &str) {
     hellyeah_dir();
     let dest = format!("{}/keybox.xml", OEM_DIR);
-    let _ = fs::copy(path, &dest);
-    let _ = fs::set_permissions(&dest, fs::Permissions::from_mode(0o777));
-    let _ = Command::new("chown").args(&["root:root", &dest]).status();
-    silent_kill("com.android.vending");
-}
-
-fn md5sum(path: &str) -> Option<String> {
-    let output = Command::new("md5sum").arg(path).output().ok()?;
-    let text = String::from_utf8_lossy(&output.stdout);
-    Some(text.split_whitespace().next()?.to_string())
-}
-
-fn main_logic() {
-    fetch_info();
-
-    let pif_info_tmp_md5 = md5sum(PIF_INFO_TMP);
-    let pif_info_md5 = md5sum(PIF_INFO);
-
-    println!("+------------------------------+");
-    println!("|         PIF.apk INFO         |");
-    println!("+------------------------------+");
-    if let Ok(info_content) = fs::read_to_string(PIF_INFO_TMP) {
-        print!("{}", info_content);
+    if fs::copy(path, &dest).is_ok() {
+        let _ = fs::set_permissions(&dest, fs::Permissions::from_mode(0o644));
+        let _ = Command::new("chown").args(&["root:root", &dest]).status();
+        println!("✓ keybox.xml injected to {}", OEM_DIR);
     }
-    println!("--------------------------------");
+}
 
-    if pif_info_tmp_md5 != pif_info_md5 {
-        println!("New Version Found! Updating...");
-        curl_pif();
-        let _ = fs::copy(PIF_INFO_TMP, PIF_INFO);
+// Fungsi untuk FORCE Refresh (Tanpa cek MD5)
+fn force_refresh() {
+    println!("Checking internet connection...");
+    if Command::new("ping").args(&["-c", "1", "-W", "2", "8.8.8.8"]).stdout(Stdio::null()).status().is_ok() {
+        println!("Connected! Starting force refresh...");
         
-        println!("Installing latest PIF.apk...");
-        // Tambahkan flag -r (reinstall) agar tidak bentrok
-        let _ = Command::new("pm").args(&["install", "-r", PIF_APK]).status();
-        
+        let tmp_json = "/data/local/tmp/pif_force.json";
+        let tmp_kbox = "/data/local/tmp/kbox_force.xml";
+
+        println!("Forcing download of pif.json...");
+        if download_file(&format!("{}/pif.json", URL_BASE), tmp_json).is_ok() {
+            push_pif_json(tmp_json);
+            let _ = fs::remove_file(tmp_json);
+        }
+
+        println!("Forcing download of keybox.xml...");
+        if download_file(&format!("{}/keybox.xml", URL_BASE), tmp_kbox).is_ok() {
+            push_keybox_xml(tmp_kbox);
+            let _ = fs::remove_file(tmp_kbox);
+        }
+
+        println!("\nRestarting system components...");
         silent_kill("com.google.android.gms.unstable");
         silent_kill("com.android.vending");
         let _ = Command::new("pkill").arg("systemui").status();
-        println!("PIF.apk updated!");
+        println!("Force refresh completed!");
     } else {
-        println!("Your PIF.apk version is already the latest one!");
+        println!("No internet connection!");
+    }
+}
+
+fn main_logic() {
+    // ... (Logika main_logic tetap sama seperti sebelumnya untuk auto-update normal)
+    println!("Checking internet connection...");
+    loop {
+        if Command::new("ping").args(&["-c", "1", "-W", "2", "8.8.8.8"]).stdout(Stdio::null()).status().map(|s| s.success()).unwrap_or(false) { break; }
+        sleep(Duration::from_secs(3));
+    }
+    let _ = download_file(&format!("{}/info.txt", URL_BASE), PIF_INFO_TMP);
+    
+    println!("\n+------------------------------+");
+    println!("|         PIF.apk INFO         |");
+    println!("+------------------------------+");
+    if let Ok(content) = fs::read_to_string(PIF_INFO_TMP) { print!("{}", content); }
+    println!("--------------------------------");
+
+    let mut updated = false;
+
+    if md5sum(PIF_INFO_TMP) != md5sum(PIF_INFO) {
+        println!("New PIF.apk version found!");
+        if download_file(&format!("{}/PIF.apk", URL_BASE), PIF_APK).is_ok() {
+            let _ = Command::new("pm").args(&["install", "-r", PIF_APK]).status();
+            let _ = fs::copy(PIF_INFO_TMP, PIF_INFO);
+            updated = true;
+        }
     }
 
-    if Path::new(PIF_INFO_TMP).exists() {
-        let _ = fs::remove_file(PIF_INFO_TMP);
+    let tmp_json = "/data/local/tmp/pif_remote.json";
+    if download_file(&format!("{}/pif.json", URL_BASE), tmp_json).is_ok() {
+        if md5sum(tmp_json) != md5sum(&format!("{}/pif.json", OEM_DIR)) {
+            push_pif_json(tmp_json);
+            updated = true;
+        }
+        let _ = fs::remove_file(tmp_json);
     }
-    if Path::new(PIF_APK).exists() {
-        let _ = fs::remove_file(PIF_APK);
+
+    let tmp_kbox = "/data/local/tmp/kbox_remote.xml";
+    if download_file(&format!("{}/keybox.xml", URL_BASE), tmp_kbox).is_ok() {
+        if md5sum(tmp_kbox) != md5sum(&format!("{}/keybox.xml", OEM_DIR)) {
+            push_keybox_xml(tmp_kbox);
+            updated = true;
+        }
+        let _ = fs::remove_file(tmp_kbox);
     }
+
+    if updated {
+        silent_kill("com.google.android.gms.unstable");
+        silent_kill("com.android.vending");
+        let _ = Command::new("pkill").arg("systemui").status();
+    } else {
+        println!("Everything is already the latest version.");
+    }
+    let _ = fs::remove_file(PIF_INFO_TMP);
 }
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-
     if args.len() > 1 {
-        let mut i = 1;
-        let mut executed_flag = false;
-        
-        while i < args.len() {
-            match args[i].as_str() {
-                "-p" => {
-                    if i + 1 < args.len() {
-                        push_pif_json(&args[i + 1]);
-                        executed_flag = true;
-                        i += 1;
-                    }
-                }
-                "-k" => {
-                    if i + 1 < args.len() {
-                        push_keybox_xml(&args[i + 1]);
-                        executed_flag = true;
-                        i += 1;
-                    }
-                }
-                _ => {}
-            }
-            i += 1;
-        }
-        
-        if !executed_flag {
-            main_logic();
+        match args[1].as_str() {
+            "refresh" => force_refresh(), // Command baru pif-updater refresh
+            "-p" => if args.len() > 2 { push_pif_json(&args[2]); },
+            "-k" => if args.len() > 2 { push_keybox_xml(&args[2]); },
+            _ => main_logic(),
         }
     } else {
         main_logic();

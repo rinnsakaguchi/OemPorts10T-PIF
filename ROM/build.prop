@@ -1,9 +1,8 @@
 # put this to true to enable debug mode (shows all logs)
 persist.sys.oemports10t.utils-debug=false
 
-# put this to false if you want to use manual mode (insert own pif/keybox.. also disables auto update)
-persist.sys.oemports10t.utils.pif.autoupdate=true
-
 # PIF
+persist.sys.oemports10t.utils.pif.refresh=true
+persist.sys.oemports10t.utils.pif.autoupdate=false
 persist.sys.oemports10t.utils.bootloader=true
 persist.sys.oemports10t.utils.fingerprint=true

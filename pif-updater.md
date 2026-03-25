@@ -4,6 +4,13 @@
 ```shell
 su
 pif-updater
+pif-updater refresh
+```
+
+## Manual update
+```shell
+su
+pif-updater refresh
 ```
 
 ## Insert own pif.json and/or keybox.xml

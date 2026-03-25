@@ -12,3 +12,21 @@ service pif_auto_updater /system/bin/pif-updater
 
 on property:sys.boot_completed=1 && property:persist.sys.oemports10t.utils.pif.autoupdate=true
     start pif_auto_updater
+
+on property:sys.boot_completed=1
+    persist.sys.oemports10t.utils.pif.autoupdate=false
+
+service pif_refresh /system/bin/pif-updater refresh
+    class main
+    seclabel u:r:pif_updater:s0
+	user root
+	group root system
+    disabled
+    oneshot
+
+on property:persist.sys.oemports10t.utils.pif.refresh=1
+    start pif_refresh
+
+on property:persist.sys.danda.pif.support_int=1
+    setprop persist.sys.oemports10t.utils.bootloader true
+    setprop persist.sys.oemports10t.utils.fingerprint true

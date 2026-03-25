@@ -31,6 +31,11 @@ Clone this repository or download the ZIP archive and extract it.
 sudo pacman -Syu --needed jre-openjdk zip unzip android-sdk-build-tools
 ```
 
+#### Termux Android 
+```sh
+pkg update -y && pkg upgrade -y && pkg install -y openjdk-17 android-tools zip unzip pkg install aapt
+```
+
 #### RHEL / Fedora / CentOS / Alma / Rocky
 ```sh
 sudo dnf install -y java-latest-openjdk android-tools zip unzip

@@ -67,7 +67,8 @@ sudo zypper install -y java-latest-openjdk android-tools zip unzip
 
 4. Run the patcher:
    ```sh
-   ./patchframework.sh
+   Linux= ./patchframework.sh
+   Termux= bash patchframework.sh
    ```
 
 5. Wait for the patching process to complete.  

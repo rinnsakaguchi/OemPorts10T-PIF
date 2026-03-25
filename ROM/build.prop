@@ -2,7 +2,7 @@
 persist.sys.oemports10t.utils-debug=false
 
 # PIF
-persist.sys.oemports10t.utils.pif.refresh=true
+persist.sys.oemports10t.utils.pif.refresh=false
 persist.sys.oemports10t.utils.pif.autoupdate=false
 persist.sys.oemports10t.utils.bootloader=true
 persist.sys.oemports10t.utils.fingerprint=true
